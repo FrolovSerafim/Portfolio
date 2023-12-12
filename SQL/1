@@ -32,50 +32,62 @@ ORDER BY 1
 5. Долю заказов новых пользователей в общем числе заказов (долю п.3 в п.1).
 
 SELECT date, orders, first_orders, new_users_orders,
-ROUND(first_orders*100/orders::DECIMAL, 2) first_orders_share, 
-ROUND(new_users_orders*100/orders::DECIMAL, 2) new_users_orders_share
+  ROUND(first_orders*100/orders::DECIMAL, 2) first_orders_share, 
+  ROUND(new_users_orders*100/orders::DECIMAL, 2) new_users_orders_share
 FROM
-(SELECT time::DATE date, COUNT(order_id) orders
-FROM user_actions
-WHERE order_id NOT IN (SELECT order_id FROM user_actions WHERE action='cancel_order')
-GROUP BY 1) table_orders LEFT JOIN
-(SELECT date, COUNT(first_order) first_orders
-FROM (SELECT user_id, MIN(time)::DATE as date, MIN(order_id) first_order
-FROM user_actions
-WHERE order_id NOT IN (SELECT order_id FROM user_actions WHERE action='cancel_order')
-GROUP BY 1) t2
-GROUP BY 1) table_first_orders USING(date) JOIN
-(SELECT date, COUNT(order_id) AS new_users_orders
-FROM (SELECT user_id, MIN(time::DATE) AS date
-      FROM user_actions
-      GROUP BY user_id) t3
-JOIN user_actions ON user_actions.user_id = t3.user_id AND user_actions.time::DATE = t3.date
-WHERE order_id NOT IN (SELECT order_id FROM user_actions WHERE action='cancel_order')
-GROUP BY 1) table_new_users_orders USING(date)
+    (SELECT time::DATE date, COUNT(order_id) orders
+    FROM user_actions
+    WHERE order_id NOT IN (SELECT order_id FROM user_actions WHERE action='cancel_order')
+    GROUP BY 1) table_orders 
+LEFT JOIN
+    (SELECT date, COUNT(first_order) first_orders
+    FROM 
+        (SELECT user_id, MIN(time)::DATE as date, MIN(order_id) first_order
+        FROM user_actions
+        WHERE order_id NOT IN (SELECT order_id FROM user_actions WHERE action='cancel_order')
+        GROUP BY 1) t2
+    GROUP BY 1) table_first_orders 
+USING(date) 
+JOIN
+    (SELECT date, COUNT(order_id) AS new_users_orders
+    FROM 
+        (SELECT user_id, MIN(time::DATE) AS date
+        FROM user_actions
+        GROUP BY user_id) t3
+    JOIN user_actions 
+    ON user_actions.user_id = t3.user_id 
+      AND user_actions.time::DATE = t3.date
+    WHERE order_id NOT IN (SELECT order_id FROM user_actions WHERE action='cancel_order')
+    GROUP BY 1) table_new_users_orders 
+USING(date)
 ORDER BY date
 
 
--Delivery time
+- Delivery time
 На основе данных в таблице courier_actions для каждого дня рассчитал, за сколько минут в среднем курьеры доставляли свои заказы.
 
 SELECT date, round(avg(delivery_time))::int as minutes_to_deliver
 FROM   
-(SELECT order_id, max(time::date) as date, extract(epoch FROM max(time) - min(time))/60 as delivery_time
-FROM   courier_actions
-WHERE  order_id not in (SELECT order_id FROM   user_actions WHERE  action = 'cancel_order')
-GROUP BY order_id) t1
+    (SELECT order_id, max(time::date) as date, extract(epoch FROM max(time) - min(time))/60 as delivery_time
+    FROM   courier_actions
+    WHERE  order_id not in (SELECT order_id FROM   user_actions WHERE  action = 'cancel_order')
+    GROUP BY order_id) t1
 GROUP BY 1
 ORDER BY 1
 
 
--Ratio orders
+- Ratio orders
 На основе данных в таблице orders для каждого часа в сутках рассчитал следующие показатели:
 1. Число успешных (доставленных) заказов.
 2. Число отменённых заказов.
 3. Долю отменённых заказов в общем числе заказов (cancel rate).
 
-SELECT DATE_PART('hour', creation_time)::INTEGER AS hour, COUNT(order_id) FILTER (WHERE order_id IN (SELECT order_id FROM courier_actions WHERE action = 'deliver_order')) successful_orders,
-COUNT(order_id) FILTER (WHERE order_id IN (SELECT order_id FROM user_actions WHERE action='cancel_order')) canceled_orders, 
-ROUND(COUNT(order_id) FILTER (WHERE order_id IN (SELECT order_id FROM user_actions WHERE action='cancel_order'))/COUNT(order_id)::DECIMAL, 3) cancel_rate
+SELECT DATE_PART('hour', creation_time)::INTEGER AS hour, 
+  COUNT(order_id) 
+    FILTER (WHERE order_id IN (SELECT order_id FROM courier_actions WHERE action = 'deliver_order')) successful_orders,
+  COUNT(order_id) 
+    FILTER (WHERE order_id IN (SELECT order_id FROM user_actions WHERE action='cancel_order')) canceled_orders, 
+  ROUND(COUNT(order_id) 
+    FILTER (WHERE order_id IN (SELECT order_id FROM user_actions WHERE action='cancel_order'))/COUNT(order_id)::DECIMAL, 3) cancel_rate
 FROM orders
 GROUP BY 1
