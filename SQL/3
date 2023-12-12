@@ -1,0 +1,141 @@
+Дашборд по анализу денежных показателей:
+https://redash.public.karpov.courses/dashboards/2685-my_dashboard-about-money
+
+Запросы к графикам:
+
+- Dynamics of daily revenue
++
+- Total revenue
+Для каждого дня в таблице orders рассчитал следующие показатели:
+1. Выручку, полученную в этот день.
+2. Суммарную выручку на текущий день.
+3. Прирост выручки, полученной в этот день, относительно значения выручки за предыдущий день.
+
+SELECT date, revenue, SUM(revenue) OVER (ORDER BY date) total_revenue,
+  ROUND(100 * (revenue - LAG(revenue, 1) OVER (ORDER BY date))::DECIMAL / LAG(revenue, 1) OVER (ORDER BY date), 2) revenue_change
+FROM   
+    (SELECT date, SUM(price) revenue
+    FROM 
+        (SELECT creation_time::DATE date, UNNEST(product_ids) product_id
+        FROM   orders
+        WHERE  order_id not in (SELECT order_id FROM user_actions WHERE action = 'cancel_order')) t1
+    LEFT JOIN 
+        products 
+    USING (product_id)
+    GROUP BY date) t2
+
+
+- Average revenue per users and orders
+Для каждого дня в таблицах orders и user_actions рассчитал следующие показатели:
+1. Выручку на пользователя (ARPU) за текущий день.
+2. Выручку на платящего пользователя (ARPPU) за текущий день.
+3. Выручку с заказа, или средний чек (AOV) за текущий день.
+
+SELECT date, 
+  ROUND(SUM(price)/total_users::DECIMAL, 2) arpu, 
+  ROUND(SUM(price)/paying_users::DECIMAL, 2) arppu, 
+  ROUND(SUM(price)/COUNT(DISTINCT order_id)::DECIMAL, 2) aov
+FROM
+    (SELECT creation_time::DATE date, order_id, UNNEST(product_ids) product_id
+    FROM orders
+    WHERE order_id NOT IN (SELECT order_id FROM user_actions WHERE action='cancel_order')
+    GROUP BY 1, 2, product_ids) t1 
+JOIN 
+    products 
+USING(product_id) 
+JOIN 
+    (SELECT COUNT(DISTINCT user_id) total_users,
+      COUNT(DISTINCT user_id) 
+        FILTER (WHERE order_id NOT IN (SELECT order_id FROM user_actions WHERE action='cancel_order')) paying_users,
+      time::DATE date 
+    FROM user_actions 
+    GROUP BY 3) t2 
+USING(date)
+GROUP BY 1, total_users, paying_users
+ORDER BY 1
+
+
+- Running ARPU, ARPPU, AOV
+По таблицам orders и user_actions для каждого дня рассчитал следующие показатели:
+1. Накопленную выручку на пользователя (Running ARPU).
+2. Накопленную выручку на платящего пользователя (Running ARPPU).
+3. Накопленную выручку с заказа, или средний чек (Running AOV).
+
+SELECT date, 
+  ROUND(run_revenue/run_total_new_users::DECIMAL, 2) running_arpu, 
+  ROUND(run_revenue/run_paying_new_users::DECIMAL, 2) running_arppu, 
+  ROUND(run_revenue/run_amount_orders::DECIMAL, 2) running_aov
+FROM
+    (SELECT date, SUM(total_new_users) OVER (ORDER BY date) run_total_new_users, SUM(paying_new_users) OVER (ORDER BY date) run_paying_new_users
+    FROM
+        (SELECT date, COUNT(DISTINCT user_id) total_new_users
+        FROM
+            (SELECT user_id, MIN(time)::DATE date
+            FROM user_actions
+            GROUP BY 1) t1
+        GROUP BY 1) t2
+    JOIN    
+        (SELECT date, 
+        COUNT(DISTINCT user_id) paying_new_users
+        FROM
+            (SELECT user_id, MIN(time)::DATE date
+            FROM user_actions
+            WHERE order_id NOT IN (SELECT order_id FROM user_actions WHERE action='cancel_order')
+            GROUP BY 1) t3
+        GROUP BY 1) t4
+    USING(date)) t5
+JOIN
+    (SELECT date, 
+      SUM(amount_orders) OVER (ORDER BY date) run_amount_orders, 
+      SUM(revenue) OVER (ORDER BY date) run_revenue
+    FROM
+        (SELECT date, COUNT(DISTINCT order_id) amount_orders, SUM(price) revenue
+        FROM
+            (SELECT creation_time::DATE date, order_id, UNNEST(product_ids) product_id
+            FROM orders
+            WHERE order_id NOT IN (SELECT order_id FROM user_actions WHERE action='cancel_order')) t6
+        JOIN 
+            products 
+        USING(product_id)
+        GROUP BY 1) t7) t8
+USING(date)
+ORDER BY 1
+
+
+- arpu, arppu, aov
+Для каждого дня недели в таблицах orders и user_actions рассчитал следующие показатели:
+1. Накопленную выручку на пользователя (ARPU).
+2. Накопленную выручку на платящего пользователя (ARPPU).
+3. Накопленную выручку на заказ (AOV).
+
+SELECT weekday, t1.weekday_number weekday_number, ROUND(revenue::DECIMAL / users, 2) arpu,
+    ROUND(revenue::DECIMAL / paying_users, 2) arppu, ROUND(revenue::DECIMAL / orders, 2) aov
+FROM   
+    (SELECT to_char(creation_time, 'Day') weekday, 
+      MAX(DATE_PART('isodow', creation_time)) weekday_number,
+      COUNT(DISTINCT order_id) orders, SUM(price) revenue
+    FROM   
+        (SELECT order_id, creation_time, unnest(product_ids) product_id
+        FROM orders
+        WHERE order_id NOT IN (SELECT order_id FROM   user_actions WHERE  action = 'cancel_order') 
+          AND creation_time BETWEEN '2022-08-26' AND '2022-09-08') t4
+    LEFT JOIN 
+        products 
+    USING (product_id)
+    GROUP BY weekday) t1
+LEFT JOIN 
+    (SELECT to_char(time, 'Day') weekday, 
+      MAX(DATE_PART('isodow', time)) weekday_number, 
+      COUNT(DISTINCT user_id) users
+    FROM user_actions
+    WHERE  time BETWEEN '2022-08-26' AND '2022-09-08'
+    GROUP BY weekday) t2 
+USING (weekday)
+LEFT JOIN 
+    (SELECT to_char(time, 'Day') weekday, MAX(DATE_PART('isodow', time)) weekday_number, COUNT(DISTINCT user_id) paying_users
+     FROM   user_actions
+     WHERE  order_id NOT IN (SELECT order_id FROM   user_actions WHERE  action = 'cancel_order')
+         AND time BETWEEN '2022-08-26' AND '2022-09-08'
+     GROUP BY weekday) t3 
+USING (weekday)
+ORDER BY weekday_number
