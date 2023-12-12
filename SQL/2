@@ -1,0 +1,113 @@
+Дашборд по анализу данных о заказах пользователей:
+https://redash.public.karpov.courses/dashboards/2646-my_dashboard-about-users-and-couriers
+
+Запросы к графикам:
+
+- new users and couriers
++
+- total users and couriers
++
+- new users and couriers change
++
+- total users and couriers change
+Для каждого дня, представленного в таблицах user_actions и courier_actions, рассчитаЛ следующие показатели:
+1. Число новых пользователей.
+2. Число новых курьеров.
+3. Общее число пользователей на текущий день.
+4. Общее число курьеров на текущий день.
+5. Прирост числа новых пользователей.
+6. Прирост числа новых курьеров.
+7. Прирост общего числа пользователей.
+8. Прирост общего числа курьеров.
+
+SELECT date, new_users, new_couriers, total_users, total_couriers, new_users_change, new_couriers_change, 
+  ROUND((total_users-LAG(total_users, 1) OVER (ORDER BY date))*100 /
+    LAG(total_users, 1) OVER (ORDER BY date)::DECIMAL, 2)  total_users_growth, 
+  ROUND((total_couriers-LAG(total_couriers, 1) OVER (ORDER BY date))*100 / 
+    LAG(total_couriers, 1) OVER (ORDER BY date)::DECIMAL, 2)  total_couriers_growth
+FROM
+    (SELECT *, 
+      SUM(new_users) OVER (ORDER BY date)::INTEGER total_users, SUM(new_couriers) 
+        OVER (ORDER BY date)::INTEGER total_couriers,
+      ROUND((new_users-LAG(new_users, 1) OVER (ORDER BY date))*100 / 
+        LAG(new_users, 1) OVER (ORDER BY date)::DECIMAL, 2) new_users_change,
+      ROUND((new_couriers-LAG(new_couriers, 1) OVER (ORDER BY date))*100 / 
+        LAG(new_couriers, 1) OVER (ORDER BY date)::DECIMAL, 2) new_couriers_change
+    FROM
+        (SELECT date, COUNT(DISTINCT user_id) new_users, COUNT(DISTINCT courier_id) new_couriers
+        FROM 
+            (SELECT DISTINCT user_id, MIN(time)::DATE as date FROM user_actions GROUP BY 1) t1 
+            JOIN
+            (SELECT DISTINCT courier_id, MIN(time)::DATE as date FROM courier_actions GROUP BY 1) t2 
+            USING (date)
+        GROUP BY 1) t3) t4
+
+
+- ratio of paying users to active couriers
++
+- ratio of shares of paying users to active couriers
+Для каждого дня, представленного в таблицах user_actions и courier_actions, рассчитал следующие показатели:
+1. Число платящих пользователей.
+2. Число активных курьеров.
+3. Долю платящих пользователей в общем числе пользователей на текущий день.
+4. Долю активных курьеров в общем числе курьеров на текущий день.
+
+SELECT date, paying_users, active_couriers, 
+  ROUND((paying_users*100/total_users::DECIMAL), 2) paying_users_share, 
+  ROUND((active_couriers*100/total_couriers::DECIMAL), 2) active_couriers_share
+FROM
+    (SELECT time::DATE date, COUNT(DISTINCT user_id) FILTER (WHERE order_id NOT IN (SELECT order_id FROM user_actions WHERE action='cancel_order')) paying_users
+    FROM user_actions
+    GROUP BY date) t1 
+LEFT JOIN
+    (SELECT time::DATE date, COUNT(DISTINCT courier_id) FILTER (WHERE order_id IN (SELECT order_id FROM courier_actions WHERE action='deliver_order')) active_couriers
+    FROM courier_actions
+    GROUP BY date) t2 
+USING(date) 
+LEFT JOIN
+    (SELECT *, SUM(new_users) OVER (ORDER BY date) total_users, SUM(new_couriers) OVER (ORDER BY date) total_couriers
+    FROM 
+        (SELECT date, COUNT(DISTINCT user_id) new_users, COUNT(DISTINCT courier_id) new_couriers
+        FROM 
+            (SELECT DISTINCT user_id, MIN(time)::DATE as date FROM user_actions GROUP BY 1) t3 
+        JOIN
+            (SELECT DISTINCT courier_id, MIN(time)::DATE as date FROM courier_actions GROUP BY 1) t4 
+        USING (date)
+        GROUP BY 1) t5) t6 
+USING(date)
+ORDER BY date
+
+- Ratio of users and orders per couriers
+На основе данных в таблицах user_actions, courier_actions и orders для каждого дня рассчитал следующие показатели:
+1. Число платящих пользователей на одного активного курьера.
+2. Число заказов на одного активного курьера.
+
+WITH total_couriers AS 
+(SELECT time::DATE date, COUNT(DISTINCT courier_id) couriers_count
+FROM courier_actions
+WHERE order_id IN (SELECT order_id FROM courier_actions WHERE action='deliver_order')
+GROUP BY 1
+ORDER BY 1),
+total_users AS 
+(SELECT time::DATE date, COUNT(DISTINCT user_id) users_count
+FROM user_actions 
+WHERE order_id NOT IN (SELECT order_id FROM user_actions WHERE action='cancel_order')
+GROUP BY 1
+ORDER BY 1),
+total_orders AS 
+(SELECT creation_time::DATE date, COUNT(DISTINCT order_id) orders_count
+FROM orders 
+WHERE order_id NOT IN (SELECT order_id FROM user_actions WHERE action='cancel_order')
+GROUP BY 1
+ORDER BY 1)
+SELECT date, ROUND(AVG(users_count/couriers_count::DECIMAL), 2) users_per_courier, ROUND(AVG(orders_count/couriers_count::DECIMAL), 2) orders_per_courier
+FROM 
+    total_couriers 
+JOIN 
+    total_users 
+USING(date) 
+JOIN 
+    total_orders 
+USING(date)
+GROUP BY 1
+ORDER BY 1
