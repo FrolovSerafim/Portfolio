@@ -21,18 +21,18 @@ https://redash.public.karpov.courses/dashboards/2646-my_dashboard-about-users-an
 8. Прирост общего числа курьеров.
 
 SELECT date, new_users, new_couriers, total_users, total_couriers, new_users_change, new_couriers_change, 
-  ROUND((total_users-LAG(total_users, 1) OVER (ORDER BY date))*100 /
-    LAG(total_users, 1) OVER (ORDER BY date)::DECIMAL, 2)  total_users_growth, 
-  ROUND((total_couriers-LAG(total_couriers, 1) OVER (ORDER BY date))*100 / 
-    LAG(total_couriers, 1) OVER (ORDER BY date)::DECIMAL, 2)  total_couriers_growth
+  ROUND((total_users-LAG(total_users, 1) OVER by_date)*100 /
+    LAG(total_users, 1) OVER by_date::DECIMAL, 2)  total_users_growth, 
+  ROUND((total_couriers-LAG(total_couriers, 1) OVER by_date)*100 / 
+    LAG(total_couriers, 1) OVER by_date::DECIMAL, 2)  total_couriers_growth
 FROM
     (SELECT *, 
-      SUM(new_users) OVER (ORDER BY date)::INTEGER total_users, SUM(new_couriers) 
-        OVER (ORDER BY date)::INTEGER total_couriers,
-      ROUND((new_users-LAG(new_users, 1) OVER (ORDER BY date))*100 / 
-        LAG(new_users, 1) OVER (ORDER BY date)::DECIMAL, 2) new_users_change,
-      ROUND((new_couriers-LAG(new_couriers, 1) OVER (ORDER BY date))*100 / 
-        LAG(new_couriers, 1) OVER (ORDER BY date)::DECIMAL, 2) new_couriers_change
+      SUM(new_users) OVER by_date::INTEGER total_users, SUM(new_couriers) 
+        OVER by_date::INTEGER total_couriers,
+      ROUND((new_users-LAG(new_users, 1) OVER by_date)*100 / 
+        LAG(new_users, 1) OVER by_date::DECIMAL, 2) new_users_change,
+      ROUND((new_couriers-LAG(new_couriers, 1) OVER by_date)*100 / 
+        LAG(new_couriers, 1) OVER by_date::DECIMAL, 2) new_couriers_change
     FROM
         (SELECT date, COUNT(DISTINCT user_id) new_users, COUNT(DISTINCT courier_id) new_couriers
         FROM 
@@ -40,7 +40,9 @@ FROM
             JOIN
             (SELECT DISTINCT courier_id, MIN(time)::DATE as date FROM courier_actions GROUP BY 1) t2 
             USING (date)
-        GROUP BY 1) t3) t4
+        GROUP BY 1) t3
+    WINDOW by_date AS (ORDER BY date)) t4
+WINDOW by_date AS (ORDER BY date)
 
 
 - ratio of paying users to active couriers
