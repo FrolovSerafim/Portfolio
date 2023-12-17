@@ -113,3 +113,17 @@ JOIN
 USING(date)
 GROUP BY 1
 ORDER BY 1
+
+
+- Count of users
++
+- Percentage of users
+Рассчитал количество и процент удержанных клиентов.
+
+SELECT date, COUNT(DISTINCT user_id) AS active_users,
+ROUND(COUNT(DISTINCT user_id)::DECIMAL / MAX(COUNT(DISTINCT user_id)) OVER() * 100, 2) AS percentage_of_users
+FROM
+(SELECT user_id, min(time::date) over (partition by user_id) as start_date, time::date as date
+FROM user_actions) t1
+WHERE start_date = '2022-08-25'
+GROUP BY date
